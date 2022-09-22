@@ -54,6 +54,8 @@
 #endif
 #include "util.h"
 
+pthread_mutex_t lock;
+
 /* sentinels indicating that the endpoint is in benchmark mode */
 static const char input_file_is_benchmark[] = "is:benchmark";
 
@@ -148,6 +150,7 @@ static int handle_connection(int sockfd, ptls_context_t *ctx, const char *server
                 if (state == IN_HANDSHAKE) {
                     if ((ret = ptls_handshake(tls, &encbuf, bytebuf + off, &leftlen, hsprop)) == 0) {
                         state = IN_1RTT;
+                        goto Exit;
                         assert(ptls_is_server(tls) || hsprop->client.early_data_acceptance != PTLS_EARLY_DATA_ACCEPTANCE_UNKNOWN);
                         /* release data sent as early-data, if server accepted it */
                         if (hsprop->client.early_data_acceptance == PTLS_EARLY_DATA_ACCEPTED)
@@ -269,8 +272,8 @@ Exit:
     if (input_file == input_file_is_benchmark) {
         double elapsed = (ctx->get_time->cb(ctx->get_time) - start_at) / 1000.0;
         ptls_cipher_suite_t *cipher_suite = ptls_get_cipher(tls);
-        fprintf(stderr, "received %" PRIu64 " bytes in %.3f seconds (%f.3Mbps); %s\n", data_received, elapsed,
-                data_received * 8 / elapsed / 1000 / 1000, cipher_suite != NULL ? cipher_suite->aead->name : "unknown cipher");
+        // fprintf(stderr, "received %" PRIu64 " bytes in %.3f seconds (%f.3Mbps); %s\n", data_received, elapsed,
+        //         data_received * 8 / elapsed / 1000 / 1000, cipher_suite != NULL ? cipher_suite->aead->name : "unknown cipher");
     }
 
     if (sockfd != -1)
@@ -309,7 +312,7 @@ static int run_server(struct sockaddr *sa, socklen_t salen, ptls_context_t *ctx,
 
     fprintf(stderr, "server started on port %d\n", ntohs(((struct sockaddr_in *)sa)->sin_port));
     while (1) {
-        fprintf(stderr, "waiting for connections\n");
+        //fprintf(stderr, "waiting for connections\n");
         if ((conn_fd = accept(listen_fd, NULL, 0)) != -1)
             handle_connection(conn_fd, ctx, NULL, input_file, hsprop, request_key_update, 0);
     }
@@ -399,19 +402,19 @@ static void usage(const char *cmd)
            cmd);
 }
 
-int main(int argc, char **argv)
-{
-    ERR_load_crypto_strings();
-    OpenSSL_add_all_algorithms();
-#if !defined(OPENSSL_NO_ENGINE)
-    /* Load all compiled-in ENGINEs */
-    ENGINE_load_builtin_engines();
-    ENGINE_register_all_ciphers();
-    ENGINE_register_all_digests();
-#endif
 
-    res_init();
+void * main_for_threads(void *args){
 
+    
+    struct Thread_args *thread_args = (struct Thread_args *) args;
+    int argc = thread_args->argc;
+    char ** argv = thread_args->argv;
+    for(int i = 0; i < argc; i++){
+        printf("argv[%d] : %s\n",i,argv[i]);
+    }
+    int test_duration = thread_args->test_duration;
+    //printf("test_duration :%d\n",test_duration);
+    
     ptls_key_exchange_algorithm_t *key_exchanges[128] = {NULL};
     ptls_cipher_suite_t *cipher_suites[128] = {NULL};
     ptls_context_t ctx = {ptls_openssl_random_bytes, &ptls_get_time, key_exchanges, cipher_suites};
@@ -426,8 +429,10 @@ int main(int argc, char **argv)
     socklen_t salen;
     int family = 0;
     const char *raw_pub_key_file = NULL, *cert_location = NULL;
-
+    pthread_mutex_lock(&lock);
+    
     while ((ch = getopt(argc, argv, "46abBC:c:i:Ik:nN:es:Sr:E:K:l:y:vV:h")) != -1) {
+        printf("optind : %d\n",optind);
         switch (ch) {
         case '4':
             family = AF_INET;
@@ -564,11 +569,20 @@ int main(int argc, char **argv)
             exit(0);
         default:
             exit(1);
-        }
+        }  
+    }
+    
+    printf("=====================\n");
+    printf("===argc1=== %d\n",argc);
+    for(int i = 0; i < argc; i++){
+        printf("argva[%d] : %s\n",i,argv[i]);
     }
     argc -= optind;
     argv += optind;
-
+    printf("=====================\n");
+    printf("===argc2=== %d\n",argc);
+    optind = 1;
+    pthread_mutex_unlock(&lock);
     if (raw_pub_key_file != NULL) {
         int is_dash = !strcmp(raw_pub_key_file, "-");
         if (is_server) {
@@ -637,6 +651,8 @@ int main(int argc, char **argv)
         }
         setup_esni(&ctx, esni_file, esni_key_exchanges.elements);
     }
+    printf("=====================\n");
+    printf("===argc=== %d\n",argc);
     if (argc != 2) {
         fprintf(stderr, "missing host and port\n");
         return 1;
@@ -650,6 +666,109 @@ int main(int argc, char **argv)
     if (is_server) {
         return run_server((struct sockaddr *)&sa, salen, &ctx, input_file, &hsprop, request_key_update);
     } else {
-        return run_client((struct sockaddr *)&sa, salen, &ctx, host, input_file, &hsprop, request_key_update, keep_sender_open);
+        struct timeval start_time;
+        struct timeval current_time;
+        double elapsed = 0.0;
+        gettimeofday(&start_time, NULL);
+        int counter = 0;
+        while(1){
+            gettimeofday(&current_time, NULL);
+            elapsed = (current_time.tv_sec - start_time.tv_sec) + (current_time.tv_usec/1000000 - start_time.tv_usec/1000000);
+            if(elapsed>test_duration){
+                break;
+            }
+            run_client((struct sockaddr *)&sa, salen, &ctx, host, input_file, &hsprop, request_key_update, keep_sender_open);
+            counter++;
+            // if(counter > 0){
+            //     printf("looping\n");
+            // }
+        }
+        printf("nb_handshakes : %d\n", counter);
     }
+}
+
+int main(int argc, char **argv)
+{
+    ERR_load_crypto_strings();
+    OpenSSL_add_all_algorithms();
+#if !defined(OPENSSL_NO_ENGINE)
+    /* Load all compiled-in ENGINEs */
+    ENGINE_load_builtin_engines();
+    ENGINE_register_all_ciphers();
+    ENGINE_register_all_digests();
+#endif
+    res_init();
+    int is_client = 0;
+    int test_duration = 0;
+    int nb_clients = 0;
+    
+    if(strcmp(argv[1],"--client") == 0){
+        is_client = 1;
+        test_duration = atoi(argv[2]);
+        nb_clients = atoi(argv[3]);
+        argv+=3;
+        argc-=3;
+    }
+    
+    if (pthread_mutex_init(&lock, NULL) != 0)
+    {
+        printf("\n mutex init failed\n");
+        return 1;
+    }
+    if(is_client){
+        pthread_t thread_id[nb_clients];
+        for(int i = 0; i < nb_clients;i++){
+            char **local_argv = malloc(sizeof(char *)*argc);
+            if(local_argv== NULL){
+                printf("malloc failed\n");
+                return(-1);
+            }
+            for(int i = 0; i < argc;i++){
+                local_argv[i] = malloc(1024*sizeof(char));
+                if(local_argv[i]== NULL){
+                    printf("malloc failed\n");
+                    return(-1);
+                }
+                strcpy(local_argv[i],argv[i]);
+            }
+            struct Thread_args *thread_args = malloc(sizeof(struct Thread_args));
+            if(thread_args == NULL){
+                printf("malloc failed\n");
+                return(-1);
+            }
+            thread_args->argc=argc;
+            thread_args->argv=local_argv;
+            thread_args->test_duration=test_duration;
+            pthread_create(&thread_id[i], NULL, main_for_threads, (void *)thread_args);
+            pthread_join(thread_id[i],NULL);
+        }
+        for(int i = 0; i < nb_clients;i++){
+            pthread_join(thread_id[i],NULL);
+        }
+    }
+    else
+    {
+
+        char **local_argv = malloc(sizeof(char *)*argc);
+        for(int i = 0; i < argc;i++){
+            local_argv[i] = malloc(128*sizeof(char));
+            strcpy(local_argv[i],argv[i]);
+        }
+
+        struct Thread_args *thread_args = malloc(sizeof(struct Thread_args));
+        if(thread_args == NULL){
+            printf("malloc failed\n");
+            return(-1);
+        }
+        thread_args->argc=argc;
+        thread_args->argv=local_argv;
+        thread_args->test_duration=test_duration;
+        
+        pthread_t thread_id;
+        pthread_create(&thread_id, NULL, main_for_threads, (void *)thread_args);
+        pthread_join(thread_id,NULL);
+
+    }
+
+
 }

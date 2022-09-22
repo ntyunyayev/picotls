@@ -40,6 +40,13 @@
 #include "picotls/pembase64.h"
 #include "picotls/openssl.h"
 
+
+struct Thread_args {
+    char ** argv;
+    int argc;
+    int test_duration;
+}thread_args_t;
+
 static inline void load_certificate_chain(ptls_context_t *ctx, const char *fn)
 {
     if (ptls_load_certificates(ctx, (char *)fn) != 0) {
