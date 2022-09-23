@@ -53,8 +53,10 @@
 #include "picotls/certificate_compression.h"
 #endif
 #include "util.h"
+#include <pthread.h>
 
 pthread_mutex_t lock;
+static pthread_barrier_t barrier;
 
 /* sentinels indicating that the endpoint is in benchmark mode */
 static const char input_file_is_benchmark[] = "is:benchmark";
@@ -409,9 +411,7 @@ void * main_for_threads(void *args){
     struct Thread_args *thread_args = (struct Thread_args *) args;
     int argc = thread_args->argc;
     char ** argv = thread_args->argv;
-    for(int i = 0; i < argc; i++){
-        printf("argv[%d] : %s\n",i,argv[i]);
-    }
+    
     int test_duration = thread_args->test_duration;
     //printf("test_duration :%d\n",test_duration);
     
@@ -432,7 +432,6 @@ void * main_for_threads(void *args){
     pthread_mutex_lock(&lock);
     
     while ((ch = getopt(argc, argv, "46abBC:c:i:Ik:nN:es:Sr:E:K:l:y:vV:h")) != -1) {
-        printf("optind : %d\n",optind);
         switch (ch) {
         case '4':
             family = AF_INET;
@@ -572,15 +571,10 @@ void * main_for_threads(void *args){
         }  
     }
     
-    printf("=====================\n");
-    printf("===argc1=== %d\n",argc);
-    for(int i = 0; i < argc; i++){
-        printf("argva[%d] : %s\n",i,argv[i]);
-    }
+    
     argc -= optind;
     argv += optind;
-    printf("=====================\n");
-    printf("===argc2=== %d\n",argc);
+
     optind = 1;
     pthread_mutex_unlock(&lock);
     if (raw_pub_key_file != NULL) {
@@ -651,8 +645,6 @@ void * main_for_threads(void *args){
         }
         setup_esni(&ctx, esni_file, esni_key_exchanges.elements);
     }
-    printf("=====================\n");
-    printf("===argc=== %d\n",argc);
     if (argc != 2) {
         fprintf(stderr, "missing host and port\n");
         return 1;
@@ -662,7 +654,7 @@ void * main_for_threads(void *args){
 
     if (resolve_address((struct sockaddr *)&sa, &salen, host, port, family, SOCK_STREAM, IPPROTO_TCP) != 0)
         exit(1);
-
+    pthread_barrier_wait(&barrier);
     if (is_server) {
         return run_server((struct sockaddr *)&sa, salen, &ctx, input_file, &hsprop, request_key_update);
     } else {
@@ -715,6 +707,10 @@ int main(int argc, char **argv)
         printf("\n mutex init failed\n");
         return 1;
     }
+    if(pthread_barrier_init(&barrier, NULL, nb_clients) != 0){
+        printf("\n barrier init failed\n");
+        return 1;
+    }
     if(is_client){
         pthread_t thread_id[nb_clients];
         for(int i = 0; i < nb_clients;i++){
@@ -724,7 +720,7 @@ int main(int argc, char **argv)
                 return(-1);
             }
             for(int i = 0; i < argc;i++){
-                local_argv[i] = malloc(1024*sizeof(char));
+                local_argv[i] = malloc(64*sizeof(char));
                 if(local_argv[i]== NULL){
                     printf("malloc failed\n");
                     return(-1);
@@ -740,7 +736,6 @@ int main(int argc, char **argv)
             thread_args->argv=local_argv;
             thread_args->test_duration=test_duration;
             pthread_create(&thread_id[i], NULL, main_for_threads, (void *)thread_args);
-            pthread_join(thread_id[i],NULL);
         }
         for(int i = 0; i < nb_clients;i++){
             pthread_join(thread_id[i],NULL);
