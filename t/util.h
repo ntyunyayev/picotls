@@ -45,6 +45,7 @@ struct Thread_args {
     char ** argv;
     int argc;
     int test_duration;
+    int port_to_use;
 }thread_args_t;
 
 static inline void load_certificate_chain(ptls_context_t *ctx, const char *fn)
