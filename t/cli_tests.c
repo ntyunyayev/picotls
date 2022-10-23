@@ -321,19 +321,28 @@ static int run_server(struct sockaddr *sa, socklen_t salen, ptls_context_t *ctx,
     return 0;
 }
 
-static int run_client(struct sockaddr *sa, socklen_t salen, ptls_context_t *ctx, const char *server_name, const char *input_file,
+static int run_client(int port, struct sockaddr *sa, socklen_t salen, ptls_context_t *ctx, const char *server_name, const char *input_file,
                       ptls_handshake_properties_t *hsprop, int request_key_update, int keep_sender_open)
 {
     int fd;
-
+    int on = 1;
+    struct sockaddr_in cli;
     hsprop->client.esni_keys = resolve_esni_keys(server_name);
 
     if ((fd = socket(sa->sa_family, SOCK_STREAM, 0)) == 1) {
         perror("socket(2) failed");
         return 1;
     }
-    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) != 0) {
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) != 0) {
         perror("setsockopt(SO_REUSEADDR) failed");
+        return 1;
+    }
+    cli.sin_family = AF_INET;
+    cli.sin_addr.s_addr = inet_addr("10.100.0.1");
+    cli.sin_port = htons(port);
+
+    if (bind(fd, (struct sockaddr*)&cli, sizeof(cli)) != 0) {
+        perror("bind(2) failed");
         return 1;
     }
     if (connect(fd, sa, salen) != 0) {
@@ -416,7 +425,6 @@ void * main_for_threads(void *args){
     char ** argv = thread_args->argv;
     
     int test_duration = thread_args->test_duration;
-    //printf("test_duration :%d\n",test_duration);
     
     ptls_key_exchange_algorithm_t *key_exchanges[128] = {NULL};
     ptls_cipher_suite_t *cipher_suites[128] = {NULL};
@@ -672,7 +680,7 @@ void * main_for_threads(void *args){
             if(elapsed>test_duration){
                 break;
             }
-            run_client((struct sockaddr *)&sa, salen, &ctx, host, input_file, &hsprop, request_key_update, keep_sender_open);
+            run_client(thread_args->port_to_use,(struct sockaddr *)&sa, salen, &ctx, host, input_file, &hsprop, request_key_update, keep_sender_open);
             counter++;
             // if(counter > 0){
             //     printf("looping\n");
@@ -738,6 +746,7 @@ int main(int argc, char **argv)
             thread_args->argc=argc;
             thread_args->argv=local_argv;
             thread_args->test_duration=test_duration;
+            thread_args->port_to_use=8000+i;
             pthread_create(&thread_id[i], NULL, main_for_threads, (void *)thread_args);
         }
         for(int i = 0; i < nb_clients;i++){

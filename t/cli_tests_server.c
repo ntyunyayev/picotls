@@ -334,6 +334,8 @@ static int run_client(struct sockaddr *sa, socklen_t salen, ptls_context_t *ctx,
         return 1;
     }
 
+    
+
     int ret = handle_connection(fd, ctx, server_name, input_file, hsprop, request_key_update, keep_sender_open);
     free(hsprop->client.esni_keys.base);
     close(fd);
