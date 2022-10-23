@@ -309,8 +309,10 @@ static int run_server(struct sockaddr *sa, socklen_t salen, ptls_context_t *ctx,
     fprintf(stderr, "server started on port %d\n", ntohs(((struct sockaddr_in *)sa)->sin_port));
     while (1) {
         // fprintf(stderr, "waiting for connections\n");
-        if ((conn_fd = accept(listen_fd, NULL, 0)) != -1)
+        if ((conn_fd = accept(listen_fd, NULL, 0)) != -1){
             handle_connection(conn_fd, ctx, NULL, input_file, hsprop, request_key_update, 0);
+            close(conn_fd);
+        }
     }
 
     return 0;
@@ -334,6 +336,7 @@ static int run_client(struct sockaddr *sa, socklen_t salen, ptls_context_t *ctx,
 
     int ret = handle_connection(fd, ctx, server_name, input_file, hsprop, request_key_update, keep_sender_open);
     free(hsprop->client.esni_keys.base);
+    close(fd);
     return ret;
 }
 

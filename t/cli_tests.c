@@ -286,7 +286,6 @@ Exit:
     ptls_buffer_dispose(&encbuf);
     ptls_buffer_dispose(&ptbuf);
     ptls_free(tls);
-
     return ret != 0;
 }
 
@@ -331,6 +330,10 @@ static int run_client(struct sockaddr *sa, socklen_t salen, ptls_context_t *ctx,
 
     if ((fd = socket(sa->sa_family, SOCK_STREAM, 0)) == 1) {
         perror("socket(2) failed");
+        return 1;
+    }
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) != 0) {
+        perror("setsockopt(SO_REUSEADDR) failed");
         return 1;
     }
     if (connect(fd, sa, salen) != 0) {
