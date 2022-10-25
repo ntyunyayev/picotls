@@ -709,7 +709,7 @@ int main(int argc, char **argv)
         }
     }
     else{
-        printf("not supposed to happend\n");
+        printf("not supposed to happend you should specify --client or --server as the first argument\n");
         return -1;
     }   
 
