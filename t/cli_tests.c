@@ -341,10 +341,10 @@ static int run_client(int port, struct sockaddr *sa, socklen_t salen, ptls_conte
     cli.sin_addr.s_addr = inet_addr("10.100.0.1");
     cli.sin_port = htons(port);
 
-    if (bind(fd, (struct sockaddr*)&cli, sizeof(cli)) != 0) {
-        perror("bind(2) failed");
-        return 1;
-    }
+    // if (bind(fd, (struct sockaddr*)&cli, sizeof(cli)) != 0) {
+    //     perror("bind(2) failed");
+    //     return 1;
+    // }
     if (connect(fd, sa, salen) != 0) {
         perror("connect(2) failed");
         return 1;
@@ -667,6 +667,7 @@ void * main_for_threads(void *args){
         exit(1);
     pthread_barrier_wait(&barrier);
     if (is_server) {
+        
         return run_server((struct sockaddr *)&sa, salen, &ctx, input_file, &hsprop, request_key_update);
     } else {
         struct timeval start_time;
@@ -746,7 +747,7 @@ int main(int argc, char **argv)
             thread_args->argc=argc;
             thread_args->argv=local_argv;
             thread_args->test_duration=test_duration;
-            thread_args->port_to_use=8000+i;
+            thread_args->port_to_use=20000+i;
             pthread_create(&thread_id[i], NULL, main_for_threads, (void *)thread_args);
         }
         for(int i = 0; i < nb_clients;i++){
@@ -755,7 +756,6 @@ int main(int argc, char **argv)
     }
     else
     {
-
         char **local_argv = malloc(sizeof(char *)*argc);
         for(int i = 0; i < argc;i++){
             local_argv[i] = malloc(128*sizeof(char));
