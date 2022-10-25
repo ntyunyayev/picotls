@@ -289,31 +289,12 @@ Exit:
     return ret != 0;
 }
 
-static int run_server(struct sockaddr *sa, socklen_t salen, ptls_context_t *ctx, const char *input_file,
+static int run_server(int listen_fd, ptls_context_t *ctx, const char *input_file,
                       ptls_handshake_properties_t *hsprop, int request_key_update)
 {
-    int listen_fd, conn_fd, on = 1;
-
-    if ((listen_fd = socket(sa->sa_family, SOCK_STREAM, 0)) == -1) {
-        perror("socket(2) failed");
-        return 1;
-    }
-    if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) != 0) {
-        perror("setsockopt(SO_REUSEADDR) failed");
-        return 1;
-    }
-    if (bind(listen_fd, sa, salen) != 0) {
-        perror("bind(2) failed");
-        return 1;
-    }
-    if (listen(listen_fd, SOMAXCONN) != 0) {
-        perror("listen(2) failed");
-        return 1;
-    }
-
-    fprintf(stderr, "server started on port %d\n", ntohs(((struct sockaddr_in *)sa)->sin_port));
+    int conn_fd;
+    fprintf(stderr, "server started on port %d\n", 8443);
     while (1) {
-        //fprintf(stderr, "waiting for connections\n");
         if ((conn_fd = accept(listen_fd, NULL, 0)) != -1)
             handle_connection(conn_fd, ctx, NULL, input_file, hsprop, request_key_update, 0);
     }
@@ -668,7 +649,7 @@ void * main_for_threads(void *args){
     pthread_barrier_wait(&barrier);
     if (is_server) {
         
-        return run_server((struct sockaddr *)&sa, salen, &ctx, input_file, &hsprop, request_key_update);
+        return run_server(thread_args->listen_fd, &ctx, input_file, &hsprop, request_key_update);
     } else {
         struct timeval start_time;
         struct timeval current_time;
@@ -705,24 +686,40 @@ int main(int argc, char **argv)
     int is_client = 0;
     int test_duration = 0;
     int nb_clients = 0;
+    int nb_servers = 0;
     
     if(strcmp(argv[1],"--client") == 0){
         is_client = 1;
         test_duration = atoi(argv[2]);
         nb_clients = atoi(argv[3]);
+        if (pthread_barrier_init(&barrier, NULL, nb_clients) != 0) {
+            printf("\n barrier init failed\n");
+            return 1;
+        }
         argv+=3;
         argc-=3;
     }
+    else if(strcmp(argv[1],"--server") == 0){
+        nb_servers = atoi(argv[2]);
+        argv+=2;
+        argc-=2;
+        if (pthread_barrier_init(&barrier, NULL, nb_servers) != 0) {
+            printf("\n barrier init failed\n");
+            return 1;
+        }
+    }
+    else{
+        printf("not supposed to happend you should specify --client or --server as the first argument\n");
+        return -1;
+    }   
+
     
     if (pthread_mutex_init(&lock, NULL) != 0)
     {
         printf("\n mutex init failed\n");
         return 1;
     }
-    if(pthread_barrier_init(&barrier, NULL, nb_clients) != 0){
-        printf("\n barrier init failed\n");
-        return 1;
-    }
+    
     if(is_client){
         pthread_t thread_id[nb_clients];
         for(int i = 0; i < nb_clients;i++){
@@ -756,26 +753,58 @@ int main(int argc, char **argv)
     }
     else
     {
-        char **local_argv = malloc(sizeof(char *)*argc);
-        for(int i = 0; i < argc;i++){
-            local_argv[i] = malloc(128*sizeof(char));
-            strcpy(local_argv[i],argv[i]);
-        }
+        pthread_t thread_id[nb_servers];
+        int listen_fd;
+        int on = 1;
+        struct sockaddr_in servaddr;
+        servaddr.sin_family = AF_INET;
+        servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+        servaddr.sin_port = htons(8443);
 
-        struct Thread_args *thread_args = malloc(sizeof(struct Thread_args));
-        if(thread_args == NULL){
-            printf("malloc failed\n");
-            return(-1);
+        if ((listen_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+            perror("socket(2) failed");
+            return 1;
         }
-        thread_args->argc=argc;
-        thread_args->argv=local_argv;
-        thread_args->test_duration=test_duration;
-        
-        pthread_t thread_id;
-        pthread_create(&thread_id, NULL, main_for_threads, (void *)thread_args);
-        pthread_join(thread_id,NULL);
+        if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) != 0) {
+            perror("setsockopt(SO_REUSEADDR) failed");
+            return 1;
+        }
+        if (bind(listen_fd, (struct sockaddr *)&servaddr, sizeof(servaddr)) != 0) {
+            perror("bind(2) failed");
+            return 1;
+        }
+        if (listen(listen_fd, SOMAXCONN) != 0) {
+            perror("listen(2) failed");
+            return 1;
+        }
+        for(int i = 0; i < nb_servers;i++){
+            char **local_argv = malloc(sizeof(char *)*argc);
+            if(local_argv== NULL){
+                printf("malloc failed\n");
+                return(-1);
+            }
+            for(int i = 0; i < argc;i++){
+                local_argv[i] = malloc(64*sizeof(char));
+                if(local_argv[i]== NULL){
+                    printf("malloc failed\n");
+                    return(-1);
+                }
+                strcpy(local_argv[i],argv[i]);
+            }
+            struct Thread_args *thread_args = malloc(sizeof(struct Thread_args));
+            if(thread_args == NULL){
+                printf("malloc failed\n");
+                return(-1);
+            }
+            thread_args->argc=argc;
+            thread_args->argv=local_argv;
+            thread_args->test_duration=test_duration;
+            thread_args->listen_fd = listen_fd;
+            pthread_create(&thread_id, NULL, main_for_threads, (void *)thread_args);
+        }
+        for(int i = 0; i < nb_servers;i++){
+            pthread_join(thread_id[i],NULL);
+        }
 
     }
-
-
 }
