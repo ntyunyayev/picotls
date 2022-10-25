@@ -108,7 +108,6 @@ static int handle_connection(int sockfd, ptls_context_t *ctx, const char *server
         if ((ret = ptls_handshake(tls, &encbuf, NULL, NULL, hsprop)) != PTLS_ERROR_IN_PROGRESS) {
             fprintf(stderr, "ptls_handshake:%d\n", ret);
             ret = 1;
-            goto Exit;
         }
     }
 
@@ -251,6 +250,7 @@ static int handle_connection(int sockfd, ptls_context_t *ctx, const char *server
 
         /* close the sender side when necessary */
         if (state == IN_1RTT && inputfd == -1) {
+            goto Exit;
             if (!keep_sender_open) {
                 ptls_buffer_t wbuf;
                 uint8_t wbuf_small[32];
@@ -664,9 +664,6 @@ void * main_for_threads(void *args){
             }
             run_client(thread_args->port_to_use,(struct sockaddr *)&sa, salen, &ctx, host, input_file, &hsprop, request_key_update, keep_sender_open);
             counter++;
-            // if(counter > 0){
-            //     printf("looping\n");
-            // }
         }
         printf("nb_handshakes : %d\n", counter);
     }
@@ -773,7 +770,7 @@ int main(int argc, char **argv)
             perror("bind(2) failed");
             return 1;
         }
-        if (listen(listen_fd, SOMAXCONN) != 0) {
+        if (listen(listen_fd, 16384) != 0) {
             perror("listen(2) failed");
             return 1;
         }
